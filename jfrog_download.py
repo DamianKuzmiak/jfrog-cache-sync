@@ -114,15 +114,21 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
 
         if calculated_sha256 != artifact["sha256"]:
             logger.error(
-                "SHA256 mismatch for %s: expected %s, got %s",
-                temp_file,
+                "SHA256 mismatch! Expected %s, got %s",
                 artifact["sha256"],
                 calculated_sha256,
             )
-            file_size = os.path.getsize(temp_file)
-            logger.debug("Removing file %s (size: %d bytes)", temp_file, file_size)
 
-            os.remove(temp_file)  # Remove the file if checksum doesn't match
+            # Rename corrupted file for later debugging
+            timestamp = time.strftime("%H%M%S")
+            corrupted_file = f"{temp_file}.corrupted_{timestamp}"
+            try:
+                os.rename(temp_file, corrupted_file)
+                logger.warning("Renamed corrupted file to %s", corrupted_file)
+            except Exception as ex:
+                logger.error("Failed to rename corrupted file %s: %s", temp_file, ex)
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
             continue
 
         try:
@@ -149,17 +155,17 @@ def cleanup_old_files(directory, keep_days=30, folder_retention=None):
     retention_map = {}
     if folder_retention:
         for rule in folder_retention:
-            if 'path' in rule and 'keep_days' in rule:
+            if "path" in rule and "keep_days" in rule:
                 # Normalize path separators for the current OS
-                normalized_path = os.path.normpath(rule['path'])
-                retention_map[normalized_path] = rule['keep_days']
-                logger.debug("Folder-specific retention: %s -> %d days", normalized_path, rule['keep_days'])
+                normalized_path = os.path.normpath(rule["path"])
+                retention_map[normalized_path] = rule["keep_days"]
+                logger.debug("Folder-specific retention: %s -> %d days", normalized_path, rule["keep_days"])
 
     for root, _, files in os.walk(directory):
         effective_keep_days = keep_days  # Start with global default
 
         relative_root = os.path.relpath(root, directory)
-        if relative_root != '.':
+        if relative_root != ".":
             normalized_relative = os.path.normpath(relative_root)
             best_match_path = ""
             best_match_days = keep_days
@@ -180,8 +186,12 @@ def cleanup_old_files(directory, keep_days=30, folder_retention=None):
             file_path = os.path.join(root, file)
             file_mtime = current_time - os.path.getmtime(file_path)
             if file_mtime > max_age_seconds:
-                logger.info("Removing old file: %s (age: %.1f days, threshold: %d days)",
-                           file_path, file_mtime / 86400, effective_keep_days)
+                logger.info(
+                    "Removing old file: %s (age: %.1f days, threshold: %d days)",
+                    file_path,
+                    file_mtime / 86400,
+                    effective_keep_days,
+                )
 
                 os.remove(file_path)
 
@@ -233,6 +243,9 @@ def main():
 
     if artifacts:
         logger.info("Found %d artifacts.", len(artifacts))
+        # Sort artifacts by creation date (newest first)
+        artifacts.sort(key=lambda x: x["created"], reverse=True)
+        logger.info("Sorted artifacts by creation date (newest first)")
         # for artifact in artifacts:
         #     logger.debug(
         #         " * path: %s, name: %s, created: %s, sha256: %s",
