@@ -5,7 +5,7 @@ import requests
 
 
 def find_artifacts(
-    url: str, repo: str, api_key: str, username: str, path: str, file_masks: List[str], days_back: int = 7
+        url: str, repo: str, api_key: str, username: str, path: str, file_masks: List[str], max_age_days: int = 7
 ) -> List[Dict]:
     """
     Query JFrog Artifactory for recently added artifacts matching given file masks.
@@ -16,10 +16,10 @@ def find_artifacts(
     :param username: Username for authentication
     :param path: Path prefix to search under
     :param file_masks: List of file name patterns (wildcards supported)
-    :param days_back: Number of days to look back for new artifacts
+    :param max_age_days: Maximum age (in days) of artifacts to include
     :return: List of dictionaries with artifact info (download URL, created time, etc.)
     """
-    date_threshold = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    date_threshold = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     name_conditions = ",\n".join([f'{{"name": {{"$match": "{mask}"}}}}' for mask in file_masks])
     aql_query = f"""items.find({{
         "$and": [
@@ -30,7 +30,7 @@ def find_artifacts(
                 {name_conditions}
             ]}}
         ]
-    }}).include("name", "repo", "path", "created")
+    }}).include("name", "repo", "path", "created", "sha256")
     """
 
     with requests.Session() as session:
@@ -59,6 +59,7 @@ def find_artifacts(
                 "name": item["name"],
                 "repo": item["repo"],
                 "path": item["path"],
+                "sha256": item.get("sha256", ""),
             }
             for item in results
         ]

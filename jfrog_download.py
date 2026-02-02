@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import time
 
 from jfrog_utils import find_artifacts, download_artifact
 
@@ -39,9 +40,6 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
             logger.info("File already exists, skipping: %s", local_file)
             continue
 
-        # print(f"Would save to: {local_file}")
-        # Continue?
-
         os.makedirs(local_dir, exist_ok=True)
         download_url = artifact["download_url"]
         temp_file = local_file + ".part"
@@ -60,12 +58,23 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
                 os.remove(temp_file)
 
 
-# def cleanup_old_files(directory, keep=5):
-#     """Keep only the latest `keep` files in the directory."""
-#     files = sorted([os.path.join(directory, f) for f in os.listdir(directory)], key=os.path.getmtime, reverse=True)
-#     for old_file in files[keep:]:
-#         logger.info(f"Removing old file: {old_file}")
-#         os.remove(old_file)
+def cleanup_old_files(directory, keep_days=5):
+    """
+    Delete files older than 'keep_days' in the directory and its subdirectories.
+
+    :param directory: Directory to clean up
+    :param keep_days: Number of days to keep files for, files older than this will be deleted
+    """
+    current_time = time.time()
+    max_age_seconds = keep_days * 24 * 3600
+
+    for root, _, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            file_mtime = current_time - os.path.getmtime(file_path)
+            if file_mtime > max_age_seconds:
+                logger.info("Would remove old file: %s (age: %1f days)", file_path, file_mtime / 86400)
+                # os.remove(file_path)
 
 
 def main():
@@ -79,8 +88,9 @@ def main():
         "repo",
         "path",
         "file_masks",
-        "days_back",
+        "max_artifact_age_days",
         "download_dir",
+        "keep_files_days",
     ]
     for key in required_keys:
         if key not in config:
@@ -94,7 +104,7 @@ def main():
         api_key=args.api_key,
         path=config["path"],
         file_masks=config["file_masks"],
-        days_back=config["days_back"],
+        max_age_days=config["max_artifact_age_days"],
     )
 
     if not artifacts:
@@ -103,11 +113,18 @@ def main():
         logger.info("Found %d artifacts.", len(artifacts))
         for artifact in artifacts:
             logger.debug(
-                " * path: %s, name: %s, created: %s", artifact["path"], artifact["name"], artifact["created"])
+                " * path: %s, name: %s, created: %s, sha256: %s",
+                artifact["path"],
+                artifact["name"],
+                artifact["created"],
+                artifact["sha256"]
+            )
 
         save_artifacts_with_structure(config["download_dir"], artifacts, args.api_key)
 
-    # cleanup_old_files(config["download_dir"], keep=5)
+    # Optional: Cleanup old files in the main repo directory
+    repo_dir = os.path.join(config["download_dir"], config["repo"])
+    cleanup_old_files(repo_dir, keep_days=config["keep_files_days"])
 
 
 if __name__ == "__main__":
@@ -115,8 +132,9 @@ if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
     FORMATTER = "%(asctime)s [%(levelname)s] %(message)s"
 
-    # File handler
-    file_handler = logging.FileHandler(PATH_TO_LOG_FILE)
+    MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 MB
+    BACKUP_COUNT = 5
+    file_handler = RotatingFileHandler(PATH_TO_LOG_FILE, maxBytes=MAX_LOG_SIZE, backupCount=BACKUP_COUNT)
     file_handler.setLevel(logging.DEBUG)
     file_formatter = logging.Formatter(FORMATTER)
     file_handler.setFormatter(file_formatter)
@@ -130,6 +148,7 @@ if __name__ == "__main__":
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
+    logger.info("=" * 80)
     logger.info("Script started.")
 
     try:

@@ -3,6 +3,7 @@
   "repo": "repo_name",
   "path": "daily_builds/",
   "file_masks": ["*.tar.gz"],
-  "days_back": 8,
-  "download_dir": "C:\\SW"
+  "max_artifact_age_days": 7,
+  "download_dir": "C:\\SW",
+  "keep_files_days": 30
 }
