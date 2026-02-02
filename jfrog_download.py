@@ -10,6 +10,8 @@ import os
 import time
 from logging.handlers import RotatingFileHandler
 
+from urllib3.exceptions import NameResolutionError
+
 from jfrog_utils import find_artifacts, download_artifact
 
 PATH_TO_LOG_FILE = r"C:\SW\log.log"
@@ -68,7 +70,7 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
     """
     for idx, artifact in enumerate(artifacts, start=1):
         logger.info(
-            "File %03d: path=%s, name=%s, created=%s, sha256=%s",
+            "File %03d: path=%s/%s, created=%s, sha256=%s",
             idx,
             artifact["path"],
             artifact["name"],
@@ -80,8 +82,10 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
         local_file = os.path.join(local_dir, artifact["name"])
 
         if os.path.exists(local_file):
-            logger.debug("File already exists, skipping.")
+            # logger.debug("File already exists, skipping.")
             continue
+
+        logger.debug("Local file not found: %s", local_file)
 
         # Path to checksums file in the same directory as the downloaded file
         checksums_file = os.path.join(local_dir, "checksums.json")
@@ -93,36 +97,39 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
 
         try:
             download_artifact(download_url, temp_file, api_key)
+        except NameResolutionError as ex:
+            logger.error("DNS resolution failed: %s", ex)
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            continue
+        except Exception as ex:
+            logger.error("Failed to download %s: %s", download_url, ex)
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            continue
 
-            calculated_sha256 = calculate_sha256(temp_file)
-            logger.info("Calculated sha256: %s", calculated_sha256)
+        calculated_sha256 = calculate_sha256(temp_file)
+        logger.info("Calculated sha256: %s", calculated_sha256)
 
-            if calculated_sha256 != artifact["sha256"]:
-                logger.error(
-                    "SHA256 mismatch for %s: expected %s, got %s",
-                    temp_file,
-                    artifact["sha256"],
-                    calculated_sha256,
-                )
-                file_size = os.path.getsize(temp_file)
-                logger.debug("Removing file %s (size: %d bytes)", temp_file, file_size)
+        if calculated_sha256 != artifact["sha256"]:
+            logger.error(
+                "SHA256 mismatch for %s: expected %s, got %s",
+                temp_file,
+                artifact["sha256"],
+                calculated_sha256,
+            )
+            file_size = os.path.getsize(temp_file)
+            logger.debug("Removing file %s (size: %d bytes)", temp_file, file_size)
 
-                os.remove(temp_file)  # Remove the file if checksum doesn't match
-                continue
+            os.remove(temp_file)  # Remove the file if checksum doesn't match
+            continue
 
+        try:
             os.replace(temp_file, local_file)
             # logger.info("SHA256 verification passed for %s", artifact["name"])
-
-            # Append checksum to checksums.json in the same directory
             append_to_checksums_file(checksums_file, artifact["name"], calculated_sha256)
-
         except Exception as ex:
-            logger.error("Failed to download or rename %s: %s", download_url, ex)
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-        finally:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
+            logger.error("Failed to rename file %s to %s: %s", temp_file, local_file, ex)
 
 
 def cleanup_old_files(directory, keep_days=5):
@@ -187,6 +194,7 @@ def main():
         path=config["path"],
         file_masks=config["file_masks"],
         max_age_days=config["max_artifact_age_days"],
+        exclude_paths=config.get("exclude_paths"),
     )
 
     if artifacts:

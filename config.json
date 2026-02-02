@@ -1,8 +1,14 @@
 {
-  "artifactory_url": "https://jfrog.company.com",
+  "artifactory_url": "https://jfrog.example.com",
   "repo": "repo_name",
   "path": "daily_builds/",
-  "file_masks": ["*.tar.gz"],
+  "exclude_paths": [
+    "*dirty*",
+    "*temp*"
+  ],
+  "file_masks": [
+    "*.tar.gz",
+  ],
   "max_artifact_age_days": 7,
   "download_dir": "C:\\SW",
   "keep_files_days": 30
