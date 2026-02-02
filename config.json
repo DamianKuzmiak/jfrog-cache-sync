@@ -1,0 +1,10 @@
+{
+  "artifactory_url": "https://jfrog.company.com",
+  "username": "",
+  "api_key": "",
+  "repo": "repo_name",
+  "path": "daily_builds/",
+  "file_masks": ["*.tar.gz"],
+  "days_back": 5,
+  "download_dir": "C:\\SW"
+}
