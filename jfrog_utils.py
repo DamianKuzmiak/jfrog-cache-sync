@@ -1,6 +1,7 @@
-import requests
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict
+
+import requests
 
 
 def find_artifacts(
@@ -61,3 +62,19 @@ def find_artifacts(
             }
             for item in results
         ]
+
+
+def download_artifact(url: str, dest_path: str, api_key: str) -> None:
+    """
+    Download an artifact from the given Jfrog artifactory URL and save it to the destination path.
+
+    :param url: The URL of the artifact to download.
+    :param dest_path: The full path (including filename) to save the artifact.
+    :param api_key: API key for authentication
+    """
+    headers = {"X-JFrog-Art-Api": api_key}
+    response = requests.get(url, stream=True, headers=headers, timeout=60)
+    response.raise_for_status()  # Raise an error for HTTP issues
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
