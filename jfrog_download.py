@@ -3,6 +3,7 @@ Script to fetch the latest artifacts from a JFrog repository.
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -22,8 +23,39 @@ def load_config(path: str = CONFIG_PATH) -> dict:
         path = os.path.join(script_dir, path)
     with open(path, encoding="utf8") as f:
         config = json.load(f)
+
     logger.debug("Loaded config: %s", config)
     return config
+
+
+def append_to_checksums_file(checksums_path: str, filename: str, sha256: str) -> None:
+    """Append a file's checksum to checksums.json file."""
+    checksums_data = {"sha256": {}}
+
+    if os.path.exists(checksums_path):
+        try:
+            with open(checksums_path, "r", encoding="utf8") as f:
+                checksums_data = json.load(f)
+                if "sha256" not in checksums_data:
+                    checksums_data["sha256"] = {}
+        except json.JSONDecodeError:
+            logger.warning("Could not parse existing checksums.json, creating fresh")
+            checksums_data = {"sha256": {}}
+
+    checksums_data["sha256"][filename] = sha256
+    with open(checksums_path, "w", encoding="utf8") as f:
+        json.dump(checksums_data, f, indent=2, ensure_ascii=False)
+
+    # logger.debug("Appended checksum for %s to %s", filename, checksums_path)
+
+
+def calculate_sha256(file_path: str) -> str:
+    """Calculate SHA256 checksum of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
 
 
 def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key: str) -> None:
@@ -34,22 +66,56 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
     :param base_dir: Local base directory to mirror JFrog structure
     :param api_key: API key for authentication
     """
-    for artifact in artifacts:
+    for idx, artifact in enumerate(artifacts, start=1):
+        logger.info(
+            "File %03d: path=%s, name=%s, created=%s, sha256=%s",
+            idx,
+            artifact["path"],
+            artifact["name"],
+            artifact["created"],
+            artifact["sha256"],
+        )
+
         local_dir = os.path.join(base_dir, artifact["repo"], artifact["path"])
         local_file = os.path.join(local_dir, artifact["name"])
+
         if os.path.exists(local_file):
-            logger.info("File already exists, skipping: %s", local_file)
+            logger.debug("File already exists, skipping.")
             continue
+
+        # Path to checksums file in the same directory as the downloaded file
+        checksums_file = os.path.join(local_dir, "checksums.json")
 
         os.makedirs(local_dir, exist_ok=True)
         download_url = artifact["download_url"]
         temp_file = local_file + ".part"
-        logger.info("Downloading %s to temporary file %s", download_url, temp_file)
+        logger.info("Downloading %s...", download_url)
 
         try:
             download_artifact(download_url, temp_file, api_key)
+
+            calculated_sha256 = calculate_sha256(temp_file)
+            logger.info("Calculated sha256: %s", calculated_sha256)
+
+            if calculated_sha256 != artifact["sha256"]:
+                logger.error(
+                    "SHA256 mismatch for %s: expected %s, got %s",
+                    temp_file,
+                    artifact["sha256"],
+                    calculated_sha256,
+                )
+                file_size = os.path.getsize(temp_file)
+                logger.debug("Removing file %s (size: %d bytes)", temp_file, file_size)
+
+                os.remove(temp_file)  # Remove the file if checksum doesn't match
+                continue
+
             os.replace(temp_file, local_file)
-            logger.info("Renamed file to %s", local_file)
+            # logger.info("SHA256 verification passed for %s", artifact["name"])
+
+            # Append checksum to checksums.json in the same directory
+            append_to_checksums_file(checksums_file, artifact["name"], calculated_sha256)
+
         except Exception as ex:
             logger.error("Failed to download or rename %s: %s", download_url, ex)
             if os.path.exists(temp_file):
@@ -123,20 +189,19 @@ def main():
         max_age_days=config["max_artifact_age_days"],
     )
 
-    if not artifacts:
-        logger.info("No artifacts found.")
-    else:
+    if artifacts:
         logger.info("Found %d artifacts.", len(artifacts))
-        for artifact in artifacts:
-            logger.debug(
-                " * path: %s, name: %s, created: %s, sha256: %s",
-                artifact["path"],
-                artifact["name"],
-                artifact["created"],
-                artifact["sha256"],
-            )
-
+        # for artifact in artifacts:
+        #     logger.debug(
+        #         " * path: %s, name: %s, created: %s, sha256: %s",
+        #         artifact["path"],
+        #         artifact["name"],
+        #         artifact["created"],
+        #         artifact["sha256"],
+        #     )
         save_artifacts_with_structure(config["download_dir"], artifacts, args.api_key)
+    else:
+        logger.info("No artifacts found.")
 
     # Optional: Cleanup old files in the main repo directory
     repo_dir = os.path.join(config["download_dir"], config["repo"])
