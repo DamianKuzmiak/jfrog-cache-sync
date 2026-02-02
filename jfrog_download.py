@@ -13,6 +13,7 @@ from logging.handlers import RotatingFileHandler
 from urllib3.exceptions import NameResolutionError
 
 from jfrog_utils import find_artifacts, download_artifact
+from file_utils import calculate_directory_size, format_size
 
 PATH_TO_LOG_FILE = r"C:\SW\log.log"
 CONFIG_PATH = "config.json"
@@ -215,6 +216,10 @@ def main():
     repo_dir = os.path.join(config["download_dir"], config["repo"])
     logger.info("Cleaning up old files older than %d days", config["keep_files_days"])
     cleanup_old_files(repo_dir, keep_days=config["keep_files_days"])
+
+    # Log repository size
+    total_size, file_count = calculate_directory_size(repo_dir)
+    logger.info("Repository size: %s (%d files)", format_size(total_size), file_count)
 
 
 if __name__ == "__main__":
