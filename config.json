@@ -11,5 +11,15 @@
   ],
   "max_artifact_age_days": 7,
   "download_dir": "C:\\SW",
-  "keep_files_days": 30
+  "keep_files_days": 30,
+  "folder_retention": [
+    {
+      "path": "release/",
+      "keep_days": 60
+    },
+    {
+      "path": "debug/",
+      "keep_days": 31
+    }
+  ]
 }

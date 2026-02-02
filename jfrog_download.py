@@ -133,23 +133,56 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
             logger.error("Failed to rename file %s to %s: %s", temp_file, local_file, ex)
 
 
-def cleanup_old_files(directory, keep_days=5):
+def cleanup_old_files(directory, keep_days=30, folder_retention=None):
     """
     Delete files older than 'keep_days' in the directory and its subdirectories.
     Also removes empty parent directories after file deletion.
+    Supports folder-specific retention policies.
 
     :param directory: Directory to clean up
-    :param keep_days: Number of days to keep files for, files older than this will be deleted
+    :param keep_days: Number of days to keep files for (global default)
+    :param folder_retention: Optional list of dicts with 'path' and 'keep_days' for folder-specific retention
     """
     current_time = time.time()
-    max_age_seconds = keep_days * 24 * 3600
+
+    # Build a mapping of normalized paths to retention days
+    retention_map = {}
+    if folder_retention:
+        for rule in folder_retention:
+            if 'path' in rule and 'keep_days' in rule:
+                # Normalize path separators for the current OS
+                normalized_path = os.path.normpath(rule['path'])
+                retention_map[normalized_path] = rule['keep_days']
+                logger.debug("Folder-specific retention: %s -> %d days", normalized_path, rule['keep_days'])
 
     for root, _, files in os.walk(directory):
+        effective_keep_days = keep_days  # Start with global default
+
+        relative_root = os.path.relpath(root, directory)
+        if relative_root != '.':
+            normalized_relative = os.path.normpath(relative_root)
+            best_match_path = ""
+            best_match_days = keep_days
+
+            for retention_path, retention_days in retention_map.items():
+                if normalized_relative == retention_path or normalized_relative.startswith(retention_path + os.sep):
+                    # Use the longest matching path (most specific rule)
+                    if len(retention_path) > len(best_match_path):
+                        best_match_path = retention_path
+                        best_match_days = retention_days
+
+            if best_match_path:
+                effective_keep_days = best_match_days
+
+        max_age_seconds = effective_keep_days * 24 * 3600
+
         for file in files:
             file_path = os.path.join(root, file)
             file_mtime = current_time - os.path.getmtime(file_path)
             if file_mtime > max_age_seconds:
-                logger.info("Removing old file: %s (age: %.1f days)", file_path, file_mtime / 86400)
+                logger.info("Removing old file: %s (age: %.1f days, threshold: %d days)",
+                           file_path, file_mtime / 86400, effective_keep_days)
+
                 os.remove(file_path)
 
                 # Remove empty parent directories after file deletion
@@ -214,8 +247,14 @@ def main():
 
     # Optional: Cleanup old files in the main repo directory
     repo_dir = os.path.join(config["download_dir"], config["repo"])
-    logger.info("Cleaning up old files older than %d days", config["keep_files_days"])
-    cleanup_old_files(repo_dir, keep_days=config["keep_files_days"])
+    logger.info("Cleaning up old files older than %d days (global default)", config["keep_files_days"])
+
+    # Get folder-specific retention rules if available
+    folder_retention = config.get("folder_retention")
+    if folder_retention:
+        logger.info("Using folder-specific retention policies for %d path(s)", len(folder_retention))
+
+    cleanup_old_files(repo_dir, keep_days=config["keep_files_days"], folder_retention=folder_retention)
 
     # Log repository size
     total_size, file_count = calculate_directory_size(repo_dir)
