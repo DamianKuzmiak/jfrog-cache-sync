@@ -10,7 +10,8 @@
     "*.tar.gz",
   ],
   "max_artifact_age_days": 7,
-  "download_dir": "C:\\SW",
+  "download_dir": "artifact_cache",
+  "logs_dir": "artifact_cache",
   "keep_files_days": 30,
   "folder_retention": [
     {

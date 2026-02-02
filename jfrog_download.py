@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import time
 from logging.handlers import RotatingFileHandler
 
@@ -15,8 +16,17 @@ from urllib3.exceptions import NameResolutionError
 from jfrog_utils import find_artifacts, download_artifact
 from file_utils import calculate_directory_size, format_size
 
-PATH_TO_LOG_FILE = r"C:\SW\log.log"
 CONFIG_PATH = "config.json"
+
+
+def resolve_relative_path(path: str, base_dir: str = None) -> str:
+    """Resolve a path that may be relative to the script directory."""
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if os.path.isabs(path):
+        return path
+    return os.path.join(base_dir, path)
 
 
 def load_config(path: str = CONFIG_PATH) -> dict:
@@ -27,7 +37,6 @@ def load_config(path: str = CONFIG_PATH) -> dict:
     with open(path, encoding="utf8") as f:
         config = json.load(f)
 
-    logger.debug("Loaded config: %s", config)
     return config
 
 
@@ -210,12 +219,11 @@ def cleanup_old_files(directory, keep_days=30, folder_retention=None):
                     pass
 
 
-def main():
+def main(config):
     parser = argparse.ArgumentParser()
     parser.add_argument("--api-key", type=str, required=True, help="JFrog API key")
     args = parser.parse_args()
 
-    config = load_config()
     required_keys = [
         "artifactory_url",
         "repo",
@@ -275,13 +283,30 @@ def main():
 
 
 if __name__ == "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        config = load_config()
+    except Exception as e:
+        # Fallback logger to console if config can't be loaded
+        logging.basicConfig(level=logging.DEBUG)
+        logging.error("Failed to load config: %s", e)
+        sys.exit(1)
+
+    config["download_dir"] = resolve_relative_path(config["download_dir"])
+    if "logs_dir" in config:
+        config["logs_dir"] = resolve_relative_path(config["logs_dir"])
+
+    log_dir = config.get("logs_dir") or script_dir
+    path_to_log_file = os.path.join(log_dir, "log.log")
+    os.makedirs(log_dir, exist_ok=True)
+
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     FORMATTER = "%(asctime)s [%(levelname)s] %(message)s"
 
     MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 MB
     BACKUP_COUNT = 5
-    file_handler = RotatingFileHandler(PATH_TO_LOG_FILE, maxBytes=MAX_LOG_SIZE, backupCount=BACKUP_COUNT)
+    file_handler = RotatingFileHandler(path_to_log_file, maxBytes=MAX_LOG_SIZE, backupCount=BACKUP_COUNT)
     file_handler.setLevel(logging.DEBUG)
     file_formatter = logging.Formatter(FORMATTER)
     file_handler.setFormatter(file_formatter)
@@ -299,7 +324,7 @@ if __name__ == "__main__":
     logger.info("Script started.")
 
     try:
-        main()
+        main(config)
         logger.info("Script completed successfully.")
     except Exception as e:
         logger.exception("Script failed with error: %s", e)

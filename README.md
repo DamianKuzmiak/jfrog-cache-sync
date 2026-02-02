@@ -41,8 +41,9 @@ Example `config.json`:
   "exclude_paths": ["*dirty*", "*temp*"],
   "file_masks": ["build_info.json", "*.tar.gz"],
   "max_artifact_age_days": 7,
-  "download_dir": "D:\\Artifacts",
+  "download_dir": "artifact_cache",
   "keep_files_days": 30,
+  "logs_dir": "logs",
   "folder_retention": [
     {"path": "your/path/debug", "keep_days": 7},
     {"path": "your/path/release", "keep_days": 60}
@@ -58,7 +59,8 @@ Configuration parameters:
 - `exclude_paths`: (Optional) List of path patterns to exclude (e.g., `["*dirty*", "*temp*"]`)
 - `file_masks`: List of file patterns to match when searching for artifacts
 - `max_artifact_age_days`: Only fetch artifacts newer than this many days
-- `download_dir`: Local directory where artifacts will be downloaded
+- `download_dir`: Local directory where artifacts will be downloaded. Can be absolute or relative to the script location
+- `logs_dir`: (Optional) Directory for log files. Can be absolute or relative to the script location. Defaults to the script directory if not specified
 - `keep_files_days`: Global default retention period (days) for downloaded files
 - `folder_retention`: (Optional) Override retention for specific folders and their subdirectories
 
