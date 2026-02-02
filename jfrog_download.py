@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import time
+from logging.handlers import RotatingFileHandler
 
 from jfrog_utils import find_artifacts, download_artifact
 
@@ -61,6 +62,7 @@ def save_artifacts_with_structure(base_dir: str, artifacts: list[dict], api_key:
 def cleanup_old_files(directory, keep_days=5):
     """
     Delete files older than 'keep_days' in the directory and its subdirectories.
+    Also removes empty parent directories after file deletion.
 
     :param directory: Directory to clean up
     :param keep_days: Number of days to keep files for, files older than this will be deleted
@@ -73,8 +75,22 @@ def cleanup_old_files(directory, keep_days=5):
             file_path = os.path.join(root, file)
             file_mtime = current_time - os.path.getmtime(file_path)
             if file_mtime > max_age_seconds:
-                logger.info("Would remove old file: %s (age: %1f days)", file_path, file_mtime / 86400)
-                # os.remove(file_path)
+                logger.info("Removing old file: %s (age: %.1f days)", file_path, file_mtime / 86400)
+                os.remove(file_path)
+
+                # Remove empty parent directories after file deletion
+                parent_dir = os.path.dirname(file_path)
+                try:
+                    # Only attempt to remove if it's not the base directory
+                    while parent_dir != directory and parent_dir:
+                        if not os.listdir(parent_dir):  # Directory is empty
+                            logger.info("Removing empty directory: %s", parent_dir)
+                            os.rmdir(parent_dir)
+                            parent_dir = os.path.dirname(parent_dir)
+                        else:
+                            break  # Directory is not empty, stop
+                except OSError:
+                    pass
 
 
 def main():
@@ -117,13 +133,14 @@ def main():
                 artifact["path"],
                 artifact["name"],
                 artifact["created"],
-                artifact["sha256"]
+                artifact["sha256"],
             )
 
         save_artifacts_with_structure(config["download_dir"], artifacts, args.api_key)
 
     # Optional: Cleanup old files in the main repo directory
     repo_dir = os.path.join(config["download_dir"], config["repo"])
+    logger.info("Cleaning up old files older than %d days", config["keep_files_days"])
     cleanup_old_files(repo_dir, keep_days=config["keep_files_days"])
 
 
